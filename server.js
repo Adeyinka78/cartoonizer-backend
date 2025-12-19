@@ -3,7 +3,6 @@ console.log("Supabase Key:", process.env.SUPABASE_KEY ? "Loaded" : "NOT LOADED!"
 console.log("Replicate Token:", process.env.REPLICATE_API_TOKEN ? "Loaded" : "NOT LOADED!");
 
 const express = require("express");
-const fetch = require("node-fetch");
 const FormData = require("form-data");
 const { createClient } = require("@supabase/supabase-js");
 const sharp = require("sharp");
@@ -103,6 +102,8 @@ app.post("/cartoonize", async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 });
+
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
