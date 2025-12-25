@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const cors = require("cors");
 const axios = require("axios");
 const { createClient } = require("@supabase/supabase-js");
 const sharp = require("sharp");
@@ -23,6 +24,15 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !REPLICATE_API_TOKEN) {
 }
 
 const app = express();
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://cartoonizer-frontend.vercel.app",
+  ],
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
 app.use(express.json({ limit: "50mb" }));
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
