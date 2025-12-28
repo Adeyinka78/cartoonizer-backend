@@ -10,7 +10,7 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
 const PORT = process.env.PORT || 3000;
 
-// 🔍 Env check (safe logs)
+// ENV CHECK
 console.log("ENV CHECK:", {
   SUPABASE_URL: !!SUPABASE_URL,
   SUPABASE_KEY: !!SUPABASE_KEY,
@@ -25,11 +25,11 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !REPLICATE_API_TOKEN) {
 
 const app = express();
 
-// ✅ CORS
+// CORS
 app.use(
   cors({
     origin: [
-      "http://localhost:5173",
+      "http://localhost:3000",
       "https://cartoonizer-frontend.vercel.app",
     ],
     methods: ["GET", "POST"],
@@ -41,12 +41,12 @@ app.use(express.json({ limit: "50mb" }));
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ✅ Health check
+// HEALTH CHECK
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "cartoonizer-backend" });
 });
 
-// 🎨 CARTOONIZE ENDPOINT (Replicate AI)
+// 🎨 CARTOONIZE ENDPOINT
 app.post("/cartoonize", async (req, res) => {
   try {
     const { imageData } = req.body;
@@ -57,6 +57,8 @@ app.post("/cartoonize", async (req, res) => {
         error: "No image data provided",
       });
     }
+
+    console.log("🎨 Cartoonize request received");
 
     // 1️⃣ Create prediction
     const createResponse = await axios.post(
@@ -77,10 +79,11 @@ app.post("/cartoonize", async (req, res) => {
     );
 
     const predictionId = createResponse.data.id;
+    console.log("🧠 Replicate prediction created:", predictionId);
 
-    // 2️⃣ Poll until completed
+    // 2️⃣ Poll result (max 10 attempts)
     let prediction;
-    while (true) {
+    for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 3000));
 
       const pollResponse = await axios.get(
@@ -93,20 +96,33 @@ app.post("/cartoonize", async (req, res) => {
       );
 
       prediction = pollResponse.data;
+      console.log(`⏳ Status (${i + 1}/10):`, prediction.status);
 
-      if (prediction.status === "succeeded") break;
+      if (prediction.status === "succeeded") {
+        console.log("✅ Prediction succeeded");
+        return res.json({
+          success: true,
+          url: prediction.output[0],
+        });
+      }
+
       if (prediction.status === "failed") {
-        throw new Error("Replicate prediction failed");
+        console.error("❌ Prediction failed:", prediction.error);
+        return res.status(500).json({
+          success: false,
+          error: "Replicate prediction failed",
+        });
       }
     }
 
-    // 3️⃣ Return final image
-    return res.json({
-      success: true,
-      url: prediction.output[0],
+    // ⛔ Timeout
+    console.error("⛔ Prediction timed out");
+    return res.status(504).json({
+      success: false,
+      error: "Prediction timed out",
     });
   } catch (err) {
-    console.error("❌ Cartoonize error:", err.message);
+    console.error("❌ Cartoonize error:", err.response?.data || err.message);
     return res.status(500).json({
       success: false,
       error: "Cartoonization failed",
@@ -114,7 +130,7 @@ app.post("/cartoonize", async (req, res) => {
   }
 });
 
-// 🚀 Start server
+// START SERVER
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
