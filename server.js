@@ -1,60 +1,80 @@
-import express from "express";
-import cors from "cors";
-import Replicate from "replicate";
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
+const sharp = require("sharp");
+const { createClient } = require("@supabase/supabase-js");
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+const PORT = process.env.PORT || 3000;
+
+if (!REPLICATE_API_TOKEN) {
+  console.error("❌ Missing REPLICATE_API_TOKEN");
+  process.exit(1);
+}
 
 const app = express();
 
-/* -------------------- MIDDLEWARE -------------------- */
-app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://cartoonizer-frontend.vercel.app",
+    ],
+    methods: ["GET", "POST"],
+  })
+);
 
-/* -------------------- HEALTH CHECK -------------------- */
+app.use(express.json({ limit: "50mb" }));
+
 app.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "cartoonizer-backend",
-  });
+  res.json({ status: "ok", service: "cartoonizer-backend" });
 });
 
-/* -------------------- REPLICATE SETUP -------------------- */
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN,
-});
-
-/* -------------------- CARTOONIZE ENDPOINT -------------------- */
 app.post("/cartoonize", async (req, res) => {
   try {
-    const { prompt } = req.body;
+    const { imageData } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
+    if (!imageData) {
+      return res.status(400).json({
+        success: false,
+        error: "No image data provided",
+      });
     }
 
-    const output = await replicate.run(
-      "cjwbw/anything-v3-better-vae:09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
+    const replicateResponse = await axios.post(
+      "https://api.replicate.com/v1/predictions",
       {
+        version:
+          "09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
         input: {
-          prompt: `anime style, high quality, ${prompt}`,
-          negative_prompt: "low quality, blurry, distorted, watermark",
-          width: 512,
-          height: 512,
-          num_inference_steps: 20,
-          guidance_scale: 7.5,
+          image: `data:image/png;base64,${imageData}`,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Token ${REPLICATE_API_TOKEN}`,
+          "Content-Type": "application/json",
         },
       }
     );
 
     res.json({
-      image: output[0],
+      success: true,
+      predictionId: replicateResponse.data.id,
     });
-  } catch (error) {
-    console.error("Replicate error:", error);
-    res.status(500).json({ error: "Failed to generate image" });
+  } catch (err) {
+    console.error("Replicate error:", err.response?.data || err.message);
+    res.status(500).json({
+      success: false,
+      error: "Cartoonization failed",
+    });
   }
 });
 
-/* -------------------- SERVER START -------------------- */
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
