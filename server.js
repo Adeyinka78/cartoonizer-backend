@@ -1,5 +1,5 @@
-import express from "express";
-import cors from "cors";
+const express = require("express");
+const cors = require("cors");
 
 const app = express();
 
@@ -8,7 +8,7 @@ const app = express();
 ======================= */
 app.use(
   cors({
-    origin: "*", // frontend + localhost allowed
+    origin: "*",
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
   })
@@ -37,17 +37,17 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    // 🔹 TEMP MOCK RESPONSE (replace with real AI later)
+    // 🔹 TEMP MOCK RESPONSE
     const fakeImageUrl =
       "https://via.placeholder.com/512?text=Cartoonized+Image";
 
-    return res.json({
+    res.json({
       success: true,
       url: fakeImageUrl,
     });
   } catch (err) {
     console.error("Cartoonize error:", err);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
       error: "Internal server error",
     });
@@ -55,7 +55,7 @@ app.post("/cartoonize", async (req, res) => {
 });
 
 /* =======================
-   404 HANDLER (FIXED)
+   404 HANDLER (EXPRESS 5 SAFE)
 ======================= */
 app.all("/*", (req, res) => {
   res.status(404).json({ error: "Route not found" });
