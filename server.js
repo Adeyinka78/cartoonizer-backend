@@ -2,26 +2,14 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 /* =========================
-   ✅ CORS — MUST COME FIRST
+   ✅ OPEN CORS (REQUIRED)
 ========================= */
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "https://cartoonizer-frontend.vercel.app",
-    ],
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-// Handle preflight explicitly (important)
+app.use(cors());
 app.options("*", cors());
 
 app.use(express.json({ limit: "50mb" }));
@@ -38,7 +26,7 @@ app.get("/", (req, res) => {
 ========================= */
 app.post("/cartoonize", async (req, res) => {
   try {
-    const { imageData, style } = req.body;
+    const { imageData } = req.body;
 
     if (!imageData) {
       return res.status(400).json({
@@ -47,7 +35,7 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    // TEMP response (until Replicate fully wired)
+    // TEMP RESPONSE (validates end-to-end)
     return res.json({
       success: true,
       url: "https://placehold.co/512x512/png?text=Cartoon+Result",
