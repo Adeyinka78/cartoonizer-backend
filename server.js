@@ -6,31 +6,31 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 
 /* =======================
-   ENVIRONMENT VARIABLES
+   ENV CHECK
 ======================= */
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const PORT = process.env.PORT || 3000;
 
 if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
-  console.error("❌ Missing required environment variables");
+  console.error("❌ Missing environment variables");
   process.exit(1);
 }
 
-const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
+/* =======================
+   CLIENTS
+======================= */
+const replicate = new Replicate({
+  auth: REPLICATE_API_TOKEN,
+});
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* =======================
    MIDDLEWARE
 ======================= */
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
-
+app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "25mb" }));
 
 /* =======================
@@ -45,44 +45,57 @@ app.get("/", (req, res) => {
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   try {
-    const { imageData, style } = req.body;
+    const { imageData } = req.body;
 
     if (!imageData) {
       return res.status(400).json({
         success: false,
-        error: "Image data is required",
+        error: "Image data missing",
       });
     }
 
-    console.log("🖼️ Sending image to Replicate...");
+    console.log("🎨 Sending image to Replicate...");
 
     const output = await replicate.run(
       "cjwbw/anything-v3-better-vae:09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
       {
         input: {
-          image: imageData,
+          image: imageData, // FULL base64 string
         },
       }
     );
 
-    if (!output || !output[0]) {
-      throw new Error("No output from Replicate");
+    const imageUrl =
+      Array.isArray(output) ? output[0] : output;
+
+    if (!imageUrl) {
+      throw new Error("Replicate returned no image");
     }
 
-    const cartoonUrl = output[0];
+    console.log("✅ Replicate image URL:", imageUrl);
 
-    const imageResponse = await fetch(cartoonUrl);
-    const buffer = Buffer.from(await imageResponse.arrayBuffer());
+    /* =======================
+       DOWNLOAD IMAGE
+    ======================= */
+    const response = await fetch(imageUrl);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
+    /* =======================
+       UPLOAD TO SUPABASE
+    ======================= */
     const fileName = `cartoon-${Date.now()}.png`;
 
-    const { error: uploadError } = await supabase.storage
+    const { error } = await supabase.storage
       .from("cartoonizer")
       .upload(fileName, buffer, {
         contentType: "image/png",
+        upsert: false,
       });
 
-    if (uploadError) throw uploadError;
+    if (error) {
+      console.error("Supabase error:", error);
+      throw error;
+    }
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
 
@@ -91,16 +104,16 @@ app.post("/cartoonize", async (req, res) => {
       url: publicUrl,
     });
   } catch (err) {
-    console.error("❌ Cartoonize error:", err);
+    console.error("❌ Cartoonize failed:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to process image",
+      error: "Image processing failed",
     });
   }
 });
 
 /* =======================
-   EXPRESS 5 SAFE 404
+   SAFE 404
 ======================= */
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
@@ -109,7 +122,6 @@ app.use((req, res) => {
 /* =======================
    START SERVER
 ======================= */
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
