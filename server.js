@@ -6,25 +6,21 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 
 /* =======================
-   ENV CHECK
+   ENV
 ======================= */
-const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-const PORT = process.env.PORT || 3000;
+const {
+  REPLICATE_API_TOKEN,
+  SUPABASE_URL,
+  SUPABASE_KEY,
+  PORT = 3000,
+} = process.env;
 
 if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
   console.error("❌ Missing environment variables");
   process.exit(1);
 }
 
-/* =======================
-   CLIENTS
-======================= */
-const replicate = new Replicate({
-  auth: REPLICATE_API_TOKEN,
-});
-
+const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* =======================
@@ -34,14 +30,14 @@ app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "25mb" }));
 
 /* =======================
-   HEALTH CHECK
+   HEALTH
 ======================= */
 app.get("/", (req, res) => {
   res.json({ status: "Cartoonizer API running" });
 });
 
 /* =======================
-   CARTOONIZE ENDPOINT
+   CARTOONIZE
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   try {
@@ -54,54 +50,56 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    console.log("🎨 Sending image to Replicate...");
-
-    const output = await replicate.run(
-      "cjwbw/anything-v3-better-vae:09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
-      {
-        input: {
-          image: imageData, // FULL base64 string
-        },
-      }
-    );
-
-    const imageUrl =
-      Array.isArray(output) ? output[0] : output;
-
-    if (!imageUrl) {
-      throw new Error("Replicate returned no image");
-    }
-
-    console.log("✅ Replicate image URL:", imageUrl);
-
     /* =======================
-       DOWNLOAD IMAGE
+       1️⃣ SAVE ORIGINAL IMAGE
     ======================= */
-    const response = await fetch(imageUrl);
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const base64 = imageData.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(base64, "base64");
 
-    /* =======================
-       UPLOAD TO SUPABASE
-    ======================= */
-    const fileName = `cartoon-${Date.now()}.png`;
+    const originalName = `input-${Date.now()}.png`;
 
-    const { error } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from("cartoonizer")
-      .upload(fileName, buffer, {
+      .upload(originalName, buffer, {
         contentType: "image/png",
         upsert: false,
       });
 
-    if (error) {
-      console.error("Supabase error:", error);
-      throw error;
+    if (uploadError) {
+      console.error(uploadError);
+      throw uploadError;
     }
 
-    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
+    const publicInputUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${originalName}`;
 
+    console.log("📤 Uploaded input image:", publicInputUrl);
+
+    /* =======================
+       2️⃣ SEND URL TO REPLICATE
+    ======================= */
+    const output = await replicate.run(
+      "cjwbw/anything-v3-better-vae:09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
+      {
+        input: {
+          image: publicInputUrl,
+        },
+      }
+    );
+
+    const cartoonUrl = Array.isArray(output) ? output[0] : output;
+
+    if (!cartoonUrl) {
+      throw new Error("Replicate returned empty output");
+    }
+
+    console.log("🎨 Replicate output:", cartoonUrl);
+
+    /* =======================
+       3️⃣ RETURN RESULT
+    ======================= */
     res.json({
       success: true,
-      url: publicUrl,
+      url: cartoonUrl,
     });
   } catch (err) {
     console.error("❌ Cartoonize failed:", err);
@@ -113,15 +111,12 @@ app.post("/cartoonize", async (req, res) => {
 });
 
 /* =======================
-   SAFE 404
+   404
 ======================= */
 app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
+  res.status(404).json({ error: "Not found" });
 });
 
-/* =======================
-   START SERVER
-======================= */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on ${PORT}`);
 });
