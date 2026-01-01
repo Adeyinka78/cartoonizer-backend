@@ -10,21 +10,15 @@ const app = express();
 /* =======================
    ENV VARIABLES
 ======================= */
-const {
-  REPLICATE_API_TOKEN,
-  SUPABASE_URL,
-  SUPABASE_KEY,
-  PORT = 3000,
-} = process.env;
+const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
 if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
   console.error("❌ Missing required environment variables");
   process.exit(1);
 }
 
-/* =======================
-   CLIENTS
-======================= */
 const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -49,11 +43,11 @@ app.get("/", (req, res) => {
 });
 
 /* =======================
-   CARTOONIZE
+   CARTOONIZE ENDPOINT
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   try {
-    const { imageData, style } = req.body;
+    const { imageData } = req.body;
 
     if (!imageData) {
       return res.status(400).json({
@@ -62,43 +56,42 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    console.log("🖼️ Uploading input image...");
+    console.log("🖼️ Received image, uploading to Supabase...");
 
     /* =======================
-       1. SAVE INPUT IMAGE
-    ======================= */
-    const base64Data = imageData.replace(/^data:image\/\w+;base64,/, "");
-    const buffer = Buffer.from(base64Data, "base64");
-
-    const inputFileName = `input-${Date.now()}.png`;
+       1. UPLOAD ORIGINAL IMAGE
+    ======================== */
+    const inputFile = `input-${Date.now()}.png`;
+    const buffer = Buffer.from(
+      imageData.replace(/^data:image\/\w+;base64,/, ""),
+      "base64"
+    );
 
     const { error: uploadError } = await supabase.storage
       .from("cartoonizer")
-      .upload(inputFileName, buffer, {
+      .upload(inputFile, buffer, {
         contentType: "image/png",
         upsert: false,
       });
 
     if (uploadError) {
-      console.error("❌ Supabase upload failed:", uploadError);
       throw uploadError;
     }
 
-    const publicInputUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${inputFileName}`;
-    console.log("📤 Public image URL:", publicInputUrl);
+    const publicInputUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${inputFile}`;
+
+    console.log("🌐 Image URL:", publicInputUrl);
 
     /* =======================
-       2. SEND TO REPLICATE
-    ======================= */
+       2. SEND TO REPLICATE (IMAGE → CARTOON)
+    ======================== */
     console.log("🎨 Sending to Replicate...");
 
     const output = await replicate.run(
-      "cjwbw/anything-v3-better-vae:09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
+      "tencentarc/cartoon:latest",
       {
         input: {
-          prompt: "anime style portrait, high quality",
-          init_image: publicInputUrl,
-          strength: 0.65,
+          image: publicInputUrl,
         },
       }
     );
@@ -106,54 +99,53 @@ app.post("/cartoonize", async (req, res) => {
     const cartoonUrl = Array.isArray(output) ? output[0] : output;
 
     if (!cartoonUrl) {
-      throw new Error("Replicate returned empty output");
+      throw new Error("Replicate returned no output");
     }
 
     console.log("🖼️ Cartoon generated:", cartoonUrl);
 
     /* =======================
-       3. DOWNLOAD RESULT
-    ======================= */
-    const imageResponse = await fetch(cartoonUrl);
-    const cartoonBuffer = Buffer.from(await imageResponse.arrayBuffer());
+       3. DOWNLOAD CARTOON IMAGE
+    ======================== */
+    const cartoonRes = await fetch(cartoonUrl);
+    const cartoonBuffer = Buffer.from(await cartoonRes.arrayBuffer());
 
     /* =======================
-       4. UPLOAD RESULT
-    ======================= */
-    const outputFileName = `cartoon-${Date.now()}.png`;
+       4. UPLOAD CARTOON IMAGE
+    ======================== */
+    const outputFile = `cartoon-${Date.now()}.png`;
 
-    const { error: uploadResultError } = await supabase.storage
+    const { error: finalUploadError } = await supabase.storage
       .from("cartoonizer")
-      .upload(outputFileName, cartoonBuffer, {
+      .upload(outputFile, cartoonBuffer, {
         contentType: "image/png",
         upsert: false,
       });
 
-    if (uploadResultError) {
-      console.error("❌ Supabase output upload failed:", uploadResultError);
-      throw uploadResultError;
+    if (finalUploadError) {
+      throw finalUploadError;
     }
 
-    const publicOutputUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${outputFileName}`;
+    const publicCartoonUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${outputFile}`;
 
     /* =======================
-       5. RESPOND
-    ======================= */
+       5. RETURN RESULT
+    ======================== */
     res.json({
       success: true,
-      url: publicOutputUrl,
+      url: publicCartoonUrl,
     });
   } catch (err) {
-    console.error("❌ FULL ERROR:", err);
+    console.error("❌ Cartoonize error:", err);
     res.status(500).json({
       success: false,
-      error: err.message || "Image processing failed",
+      error: "Image processing failed",
     });
   }
 });
 
 /* =======================
-   404 (EXPRESS-SAFE)
+   404 HANDLER
 ======================= */
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
@@ -162,6 +154,7 @@ app.use((req, res) => {
 /* =======================
    START SERVER
 ======================= */
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
