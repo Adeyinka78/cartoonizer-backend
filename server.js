@@ -1,145 +1,112 @@
-import express from "express";
-import cors from "cors";
-import multer from "multer";
-import fetch from "node-fetch";
-import { createClient } from "@supabase/supabase-js";
+const express = require("express");
+const cors = require("cors");
+const Replicate = require("replicate");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors());
-app.use(express.json());
-
-// 🔐 ENVIRONMENT VARIABLES (REQUIRED)
+/* =======================
+   ENV
+======================= */
 const {
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
-  SUPABASE_BUCKET,
   REPLICATE_API_TOKEN,
-  REPLICATE_MODEL_VERSION,
+  SUPABASE_URL,
+  SUPABASE_KEY,
   PORT = 3000,
 } = process.env;
 
-// ❌ HARD FAIL IF MISCONFIGURED
-if (
-  !SUPABASE_URL ||
-  !SUPABASE_SERVICE_ROLE_KEY ||
-  !SUPABASE_BUCKET ||
-  !REPLICATE_API_TOKEN ||
-  !REPLICATE_MODEL_VERSION
-) {
-  throw new Error("❌ Missing required environment variables");
+if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
+  console.error("❌ Missing environment variables");
+  process.exit(1);
 }
 
-// ✅ Supabase Admin Client (BYPASSES RLS)
-const supabase = createClient(
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY
-);
+/* =======================
+   CLIENTS
+======================= */
+const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
 
-// 🔁 Replicate polling helper
-async function runReplicate(imageUrl) {
-  const createRes = await fetch(
-    "https://api.replicate.com/v1/predictions",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Token ${REPLICATE_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        version: REPLICATE_MODEL_VERSION,
-        input: { image: imageUrl },
-      }),
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: false },
+});
+
+/* =======================
+   MIDDLEWARE
+======================= */
+app.use(cors({ origin: "*" }));
+app.use(express.json({ limit: "25mb" }));
+
+/* =======================
+   HEALTH
+======================= */
+app.get("/", (_, res) => {
+  res.json({ status: "Cartoonizer API running" });
+});
+
+/* =======================
+   CARTOONIZE
+======================= */
+app.post("/cartoonize", async (req, res) => {
+  try {
+    const { imageData } = req.body;
+
+    if (!imageData) {
+      return res.status(400).json({ success: false, error: "No image data" });
     }
-  );
 
-  const prediction = await createRes.json();
+    console.log("🖼️ Received image");
 
-  if (!prediction?.id) {
-    throw new Error("Failed to create Replicate prediction");
-  }
+    /* --- Replicate (ASYNC SAFE) --- */
+    const prediction = await replicate.predictions.create({
+      version: "efc7c21e5c8f5d71b8c3a6a7cfc7c63c1c8edc7f4b7d8a1c4d1c4d7c8a2d1e",
+      input: { image: imageData },
+    });
 
-  let result = prediction;
+    let result = prediction;
 
-  while (
-    result.status !== "succeeded" &&
-    result.status !== "failed"
-  ) {
-    await new Promise((r) => setTimeout(r, 2000));
+    while (
+      result.status !== "succeeded" &&
+      result.status !== "failed"
+    ) {
+      await new Promise((r) => setTimeout(r, 2000));
+      result = await replicate.predictions.get(result.id);
+    }
 
-    const pollRes = await fetch(
-      `https://api.replicate.com/v1/predictions/${prediction.id}`,
-      {
-        headers: {
-          Authorization: `Token ${REPLICATE_API_TOKEN}`,
-        },
-      }
-    );
+    if (result.status === "failed") {
+      throw new Error("Replicate processing failed");
+    }
 
-    result = await pollRes.json();
-  }
+    const imageUrl = result.output[0];
+    console.log("✅ Replicate done");
 
-  if (result.status === "failed") {
-    throw new Error("Replicate image generation failed");
-  }
+    /* --- Upload to Supabase --- */
+    const imgRes = await fetch(imageUrl);
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
 
-  return result.output[0];
-}
+    const filename = `cartoon-${Date.now()}.png`;
 
-// 🎨 CARTOONIZE ROUTE
-app.post(
-  "/cartoonize",
-  upload.single("image"),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No image uploaded" });
-      }
-
-      console.log("📥 Image received");
-
-      // 1️⃣ Upload to Supabase
-      const fileName = `uploads/${Date.now()}-${req.file.originalname}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from(SUPABASE_BUCKET)
-        .upload(fileName, req.file.buffer, {
-          contentType: req.file.mimetype,
-          upsert: true,
-        });
-
-      if (uploadError) {
-        console.error(uploadError);
-        throw new Error("Supabase upload failed");
-      }
-
-      const { data: publicData } = supabase.storage
-        .from(SUPABASE_BUCKET)
-        .getPublicUrl(fileName);
-
-      const imageUrl = publicData.publicUrl;
-
-      console.log("☁️ Uploaded:", imageUrl);
-
-      // 2️⃣ Send to Replicate
-      const cartoonUrl = await runReplicate(imageUrl);
-
-      console.log("🎉 Cartoon ready:", cartoonUrl);
-
-      // 3️⃣ Return to frontend
-      res.json({ cartoonUrl });
-    } catch (err) {
-      console.error("❌ Cartoonize error:", err);
-      res.status(500).json({
-        error: "Image processing failed",
-        details: err.message,
+    const { error } = await supabase.storage
+      .from("cartoonizer")
+      .upload(filename, buffer, {
+        contentType: "image/png",
       });
-    }
-  }
-);
 
-// 🚀 START SERVER
+    if (error) throw error;
+
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${filename}`;
+
+    res.json({ success: true, url: publicUrl });
+  } catch (err) {
+    console.error("❌ Cartoonize error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Image processing failed",
+    });
+  }
+});
+
+/* =======================
+   START
+======================= */
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
