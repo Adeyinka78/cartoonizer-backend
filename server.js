@@ -20,26 +20,20 @@ if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1);
 }
 
-/* =======================
-   CLIENTS
-======================= */
 const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: false },
-});
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* =======================
    MIDDLEWARE
 ======================= */
 app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "20mb" }));
 
 /* =======================
    HEALTH
 ======================= */
 app.get("/", (_, res) => {
-  res.json({ status: "Cartoonizer API running" });
+  res.json({ status: "OK" });
 });
 
 /* =======================
@@ -53,50 +47,53 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ success: false, error: "No image data" });
     }
 
-    console.log("🖼️ Received image");
+    console.log("🖼️ Creating Replicate prediction...");
 
-    /* --- Replicate (ASYNC SAFE) --- */
+    // 1️⃣ CREATE PREDICTION
     const prediction = await replicate.predictions.create({
-      version: "efc7c21e5c8f5d71b8c3a6a7cfc7c63c1c8edc7f4b7d8a1c4d1c4d7c8a2d1e",
-      input: { image: imageData },
+      version:
+        "09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
+      input: {
+        image: imageData,
+      },
     });
 
+    // 2️⃣ WAIT FOR COMPLETION
     let result = prediction;
-
-    while (
-      result.status !== "succeeded" &&
-      result.status !== "failed"
-    ) {
-      await new Promise((r) => setTimeout(r, 2000));
+    while (result.status !== "succeeded" && result.status !== "failed") {
+      await new Promise((r) => setTimeout(r, 1500));
       result = await replicate.predictions.get(result.id);
     }
 
     if (result.status === "failed") {
-      throw new Error("Replicate processing failed");
+      throw new Error("Replicate failed");
     }
 
     const imageUrl = result.output[0];
-    console.log("✅ Replicate done");
 
-    /* --- Upload to Supabase --- */
+    console.log("⬆ Uploading to Supabase...");
+
+    // 3️⃣ DOWNLOAD IMAGE
     const imgRes = await fetch(imageUrl);
     const buffer = Buffer.from(await imgRes.arrayBuffer());
 
-    const filename = `cartoon-${Date.now()}.png`;
+    const fileName = `cartoon-${Date.now()}.png`;
 
+    // 4️⃣ UPLOAD TO SUPABASE
     const { error } = await supabase.storage
       .from("cartoonizer")
-      .upload(filename, buffer, {
+      .upload(fileName, buffer, {
         contentType: "image/png",
       });
 
     if (error) throw error;
 
-    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${filename}`;
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
 
+    // 5️⃣ RETURN
     res.json({ success: true, url: publicUrl });
   } catch (err) {
-    console.error("❌ Cartoonize error:", err);
+    console.error("❌ Cartoonize error:", err.message);
     res.status(500).json({
       success: false,
       error: "Image processing failed",
@@ -108,5 +105,5 @@ app.post("/cartoonize", async (req, res) => {
    START
 ======================= */
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server running on ${PORT}`);
 });
