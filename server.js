@@ -1,160 +1,145 @@
-const express = require("express");
-const cors = require("cors");
-const Replicate = require("replicate");
-const { createClient } = require("@supabase/supabase-js");
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import fetch from "node-fetch";
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
+const upload = multer({ storage: multer.memoryStorage() });
 
-/* =======================
-   ENV VARIABLES
-======================= */
-const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+app.use(cors());
+app.use(express.json());
 
-if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
-  console.error("❌ Missing required environment variables");
-  process.exit(1);
+// 🔐 ENVIRONMENT VARIABLES (REQUIRED)
+const {
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  SUPABASE_BUCKET,
+  REPLICATE_API_TOKEN,
+  REPLICATE_MODEL_VERSION,
+  PORT = 3000,
+} = process.env;
+
+// ❌ HARD FAIL IF MISCONFIGURED
+if (
+  !SUPABASE_URL ||
+  !SUPABASE_SERVICE_ROLE_KEY ||
+  !SUPABASE_BUCKET ||
+  !REPLICATE_API_TOKEN ||
+  !REPLICATE_MODEL_VERSION
+) {
+  throw new Error("❌ Missing required environment variables");
 }
 
-const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-/* =======================
-   MIDDLEWARE
-======================= */
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
+// ✅ Supabase Admin Client (BYPASSES RLS)
+const supabase = createClient(
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY
 );
 
-app.use(express.json({ limit: "25mb" }));
-
-/* =======================
-   HEALTH CHECK
-======================= */
-app.get("/", (req, res) => {
-  res.json({ status: "Cartoonizer API running" });
-});
-
-/* =======================
-   CARTOONIZE ENDPOINT
-======================= */
-app.post("/cartoonize", async (req, res) => {
-  try {
-    const { imageData } = req.body;
-
-    if (!imageData) {
-      return res.status(400).json({
-        success: false,
-        error: "Image data is required",
-      });
+// 🔁 Replicate polling helper
+async function runReplicate(imageUrl) {
+  const createRes = await fetch(
+    "https://api.replicate.com/v1/predictions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${REPLICATE_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        version: REPLICATE_MODEL_VERSION,
+        input: { image: imageUrl },
+      }),
     }
+  );
 
-    console.log("🖼️ Received image, uploading to Supabase...");
+  const prediction = await createRes.json();
 
-    /* =======================
-       1. UPLOAD ORIGINAL IMAGE
-    ======================== */
-    const inputFile = `input-${Date.now()}.png`;
-    const buffer = Buffer.from(
-      imageData.replace(/^data:image\/\w+;base64,/, ""),
-      "base64"
-    );
+  if (!prediction?.id) {
+    throw new Error("Failed to create Replicate prediction");
+  }
 
-    const { error: uploadError } = await supabase.storage
-      .from("cartoonizer")
-      .upload(inputFile, buffer, {
-        contentType: "image/png",
-        upsert: false,
-      });
+  let result = prediction;
 
-    if (uploadError) {
-      throw uploadError;
-    }
+  while (
+    result.status !== "succeeded" &&
+    result.status !== "failed"
+  ) {
+    await new Promise((r) => setTimeout(r, 2000));
 
-    const publicInputUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${inputFile}`;
-
-    console.log("🌐 Image URL:", publicInputUrl);
-
-    /* =======================
-       2. SEND TO REPLICATE (IMAGE → CARTOON)
-    ======================== */
-    console.log("🎨 Sending to Replicate...");
-
-    const output = await replicate.run(
-      "tencentarc/cartoon:latest",
+    const pollRes = await fetch(
+      `https://api.replicate.com/v1/predictions/${prediction.id}`,
       {
-        input: {
-          image: publicInputUrl,
+        headers: {
+          Authorization: `Token ${REPLICATE_API_TOKEN}`,
         },
       }
     );
 
-    const cartoonUrl = Array.isArray(output) ? output[0] : output;
-
-    if (!cartoonUrl) {
-      throw new Error("Replicate returned no output");
-    }
-
-    console.log("🖼️ Cartoon generated:", cartoonUrl);
-
-    /* =======================
-       3. DOWNLOAD CARTOON IMAGE
-    ======================== */
-    const cartoonRes = await fetch(cartoonUrl);
-    const cartoonBuffer = Buffer.from(await cartoonRes.arrayBuffer());
-
-    /* =======================
-       4. UPLOAD CARTOON IMAGE
-    ======================== */
-    const outputFile = `cartoon-${Date.now()}.png`;
-
-    const { error: finalUploadError } = await supabase.storage
-      .from("cartoonizer")
-      .upload(outputFile, cartoonBuffer, {
-        contentType: "image/png",
-        upsert: false,
-      });
-
-    if (finalUploadError) {
-      throw finalUploadError;
-    }
-
-    const publicCartoonUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${outputFile}`;
-
-    /* =======================
-       5. RETURN RESULT
-    ======================== */
-    res.json({
-      success: true,
-      url: publicCartoonUrl,
-    });
-  } catch (err) {
-    console.error("❌ Cartoonize error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Image processing failed",
-    });
+    result = await pollRes.json();
   }
-});
 
-/* =======================
-   404 HANDLER
-======================= */
-app.use((req, res) => {
-  res.status(404).json({ error: "Route not found" });
-});
+  if (result.status === "failed") {
+    throw new Error("Replicate image generation failed");
+  }
 
-/* =======================
-   START SERVER
-======================= */
-const PORT = process.env.PORT || 3000;
+  return result.output[0];
+}
+
+// 🎨 CARTOONIZE ROUTE
+app.post(
+  "/cartoonize",
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No image uploaded" });
+      }
+
+      console.log("📥 Image received");
+
+      // 1️⃣ Upload to Supabase
+      const fileName = `uploads/${Date.now()}-${req.file.originalname}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(SUPABASE_BUCKET)
+        .upload(fileName, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error(uploadError);
+        throw new Error("Supabase upload failed");
+      }
+
+      const { data: publicData } = supabase.storage
+        .from(SUPABASE_BUCKET)
+        .getPublicUrl(fileName);
+
+      const imageUrl = publicData.publicUrl;
+
+      console.log("☁️ Uploaded:", imageUrl);
+
+      // 2️⃣ Send to Replicate
+      const cartoonUrl = await runReplicate(imageUrl);
+
+      console.log("🎉 Cartoon ready:", cartoonUrl);
+
+      // 3️⃣ Return to frontend
+      res.json({ cartoonUrl });
+    } catch (err) {
+      console.error("❌ Cartoonize error:", err);
+      res.status(500).json({
+        error: "Image processing failed",
+        details: err.message,
+      });
+    }
+  }
+);
+
+// 🚀 START SERVER
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
