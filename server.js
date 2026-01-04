@@ -27,11 +27,11 @@ if (
 }
 
 /* =======================
-   CREDIT CONFIG (STEP 1B.2)
+   CREDIT CONFIG
 ======================= */
 export const CREDIT_COST = {
-  basic: 1,     // standard cartoon
-  premium: 3,   // future premium avatar
+  basic: 1,
+  premium: 3,
 };
 
 /* =======================
@@ -41,17 +41,23 @@ const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* =======================
-   MIDDLEWARE
+   CORS (FIXED)
 ======================= */
 app.use(
   cors({
-    origin: [FRONTEND_URL, "http://localhost:5173"],
+    origin: [
+      FRONTEND_URL,                 // your Vercel frontend
+      "http://localhost:5173",      // local dev
+    ],
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   })
 );
 
+// Preflight handler
 app.options("*", cors());
+
 app.use(express.json({ limit: "25mb" }));
 
 /* =======================
@@ -62,7 +68,7 @@ app.get("/", (_, res) => {
 });
 
 /* =======================
-   CARTOONIZE (NO CREDIT ENFORCEMENT YET)
+   CARTOONIZE
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   try {
