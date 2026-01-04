@@ -1,99 +1,156 @@
-const express = require("express");
-const cors = require("cors");
-const Replicate = require("replicate");
-const { createClient } = require("@supabase/supabase-js");
+import express from "express";
+import cors from "cors";
+import Replicate from "replicate";
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
+import fetch from "node-fetch";
 
 const app = express();
 
 /* =======================
-   ENV
+   ENV VARIABLES
 ======================= */
 const {
   REPLICATE_API_TOKEN,
   SUPABASE_URL,
   SUPABASE_KEY,
-  PORT = 3000,
+  STRIPE_SECRET_KEY,
+  STRIPE_PRICE_ID,
+  FRONTEND_URL,
 } = process.env;
 
-if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY) {
+if (
+  !REPLICATE_API_TOKEN ||
+  !SUPABASE_URL ||
+  !SUPABASE_KEY ||
+  !STRIPE_SECRET_KEY ||
+  !STRIPE_PRICE_ID ||
+  !FRONTEND_URL
+) {
   console.error("❌ Missing environment variables");
   process.exit(1);
 }
 
 const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
+const stripe = new Stripe(STRIPE_SECRET_KEY, {
+  apiVersion: "2023-10-16",
+});
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* =======================
    MIDDLEWARE
 ======================= */
-app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "20mb" }));
+app.use(
+  cors({
+    origin: [FRONTEND_URL, "http://localhost:5173"],
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
+
+// Handle CORS preflight explicitly
+app.options("*", cors());
+
+app.use(express.json({ limit: "25mb" }));
 
 /* =======================
-   HEALTH
+   HEALTH CHECK
 ======================= */
 app.get("/", (_, res) => {
-  res.json({ status: "OK" });
+  res.json({ status: "Premium Avatar API running" });
 });
 
 /* =======================
-   CARTOONIZE
+   STRIPE CHECKOUT
+======================= */
+app.post("/create-checkout-session", async (_, res) => {
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      mode: "payment",
+      success_url: `${FRONTEND_URL}/?paid=true`,
+      cancel_url: `${FRONTEND_URL}`,
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("❌ Stripe error:", err);
+    res.status(500).json({ error: "Payment failed" });
+  }
+});
+
+/* =======================
+   STYLE PROMPTS (future-proof)
+======================= */
+const STYLE_PROMPTS = {
+  anime: "anime portrait, clean lines, smooth skin, vibrant colors",
+  pixar: "3d pixar style character, soft lighting, glossy finish",
+  illustration: "premium digital illustration portrait, ultra detail",
+};
+
+/* =======================
+   AVATAR GENERATION
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   try {
-    const { imageData } = req.body;
+    const { imageData, style = "illustration" } = req.body;
 
     if (!imageData) {
-      return res.status(400).json({ success: false, error: "No image data" });
+      return res.status(400).json({
+        success: false,
+        error: "Image data is required",
+      });
     }
 
-    console.log("🖼️ Creating Replicate prediction...");
+    // Safe style fallback (future use if you switch to a prompt-based model)
+    const prompt = STYLE_PROMPTS[style] || STYLE_PROMPTS["illustration"];
+    console.log("🎭 Using style prompt:", prompt);
 
-    // 1️⃣ CREATE PREDICTION
-    const prediction = await replicate.predictions.create({
-      version:
-        "09a5805203f4c12da649ec1923bb7729517ca25fcac790e640eaa9ed66573b65",
+    console.log("🔍 Step 1: Face enhancement");
+
+    const enhanced = await replicate.run("tencentarc/gfpgan:latest", {
+      input: { image: imageData },
+    });
+
+    if (!enhanced?.[0]) {
+      throw new Error("Face enhancement failed");
+    }
+
+    console.log("🎨 Step 2: Cartoonization");
+
+    const cartoon = await replicate.run("tencentarc/cartoon:latest", {
       input: {
-        image: imageData,
+        image: enhanced[0],
+        // Note: cartoon model currently ignores prompt, so we do not pass it
       },
     });
 
-    // 2️⃣ WAIT FOR COMPLETION
-    let result = prediction;
-    while (result.status !== "succeeded" && result.status !== "failed") {
-      await new Promise((r) => setTimeout(r, 1500));
-      result = await replicate.predictions.get(result.id);
+    if (!cartoon?.[0]) {
+      throw new Error("Cartoonization failed");
     }
 
-    if (result.status === "failed") {
-      throw new Error("Replicate failed");
-    }
+    console.log("☁️ Step 3: Uploading to Supabase");
 
-    const imageUrl = result.output[0];
-
-    console.log("⬆ Uploading to Supabase...");
-
-    // 3️⃣ DOWNLOAD IMAGE
-    const imgRes = await fetch(imageUrl);
+    const imgRes = await fetch(cartoon[0]);
     const buffer = Buffer.from(await imgRes.arrayBuffer());
 
-    const fileName = `cartoon-${Date.now()}.png`;
+    const fileName = `avatar-${Date.now()}.png`;
 
-    // 4️⃣ UPLOAD TO SUPABASE
     const { error } = await supabase.storage
       .from("cartoonizer")
       .upload(fileName, buffer, {
         contentType: "image/png",
+        upsert: true,
       });
 
     if (error) throw error;
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
 
-    // 5️⃣ RETURN
     res.json({ success: true, url: publicUrl });
   } catch (err) {
-    console.error("❌ Cartoonize error:", err.message);
+    console.error("❌ Avatar error:", err);
     res.status(500).json({
       success: false,
       error: "Image processing failed",
@@ -102,8 +159,9 @@ app.post("/cartoonize", async (req, res) => {
 });
 
 /* =======================
-   START
+   START SERVER
 ======================= */
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
