@@ -6,9 +6,6 @@ import fetch from "node-fetch";
 
 const app = express();
 
-/* =======================
-   ENV VARIABLES
-======================= */
 const {
   REPLICATE_API_TOKEN,
   SUPABASE_URL,
@@ -16,31 +13,17 @@ const {
   FRONTEND_URL,
 } = process.env;
 
-if (
-  !REPLICATE_API_TOKEN ||
-  !SUPABASE_URL ||
-  !SUPABASE_KEY ||
-  !FRONTEND_URL
-) {
+if (!REPLICATE_API_TOKEN || !SUPABASE_URL || !SUPABASE_KEY || !FRONTEND_URL) {
   console.error("❌ Missing environment variables");
   process.exit(1);
 }
 
-/* =======================
-   CLIENTS
-======================= */
 const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* =======================
-   MIDDLEWARE
-======================= */
 app.use(
   cors({
-    origin: [
-      FRONTEND_URL,
-      "http://localhost:5173",
-    ],
+    origin: [FRONTEND_URL, "http://localhost:5173"],
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
@@ -56,16 +39,10 @@ app.options("*", (req, res) => {
 
 app.use(express.json({ limit: "25mb" }));
 
-/* =======================
-   HEALTH CHECK
-======================= */
 app.get("/", (_, res) => {
   res.json({ status: "Avatar API running" });
 });
 
-/* =======================
-   CARTOONIZE ROUTE
-======================= */
 app.post("/cartoonize", async (req, res) => {
   console.log("📩 /cartoonize request received");
 
@@ -73,31 +50,33 @@ app.post("/cartoonize", async (req, res) => {
     const { imageData } = req.body;
 
     if (!imageData) {
-      console.log("❌ No image data received");
       return res.status(400).json({ success: false, error: "Image required" });
     }
 
     console.log("🎨 Running catacolabs/cartoonify model...");
 
     const output = await replicate.run(
-      "catacolabs/cartoonify:f109015d60170dfb20460f17da8cb863155823c85ece1115e1e9e4ec7ef51d3b",
+      "catacolabs/cartoonify",
       {
         input: {
-          image: imageData,
-          seed: 12345
+          image: imageData
         }
       }
     );
 
-    const imageUrl = output.url;
-    console.log("🖼 Model output:", imageUrl);
+    console.log("🧪 RAW MODEL OUTPUT:", output);
+
+    const imageUrl = output?.output;
+
+    if (!imageUrl) {
+      console.error("❌ Model returned no image URL");
+      return res.status(500).json({ success: false, error: "Model failed" });
+    }
 
     const response = await fetch(imageUrl);
     const buffer = Buffer.from(await response.arrayBuffer());
 
     const fileName = `avatar-${Date.now()}.png`;
-
-    console.log("⬆️ Uploading to Supabase:", fileName);
 
     const { error: uploadError } = await supabase.storage
       .from("cartoonizer")
@@ -121,9 +100,6 @@ app.post("/cartoonize", async (req, res) => {
   }
 });
 
-/* =======================
-   START SERVER
-======================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
