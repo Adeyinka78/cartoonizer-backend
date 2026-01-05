@@ -58,7 +58,7 @@ app.get("/", (_, res) => {
 });
 
 /* =======================
-   CARTOONIZE (REAL-ESRGAN + CARTOON 3.0)
+   CARTOONIZE (FACE RESTORATION + CARTOON 3.0)
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   console.log("📩 /cartoonize request received");
@@ -77,40 +77,38 @@ app.post("/cartoonize", async (req, res) => {
     console.log("🖼 Received imageData length:", imageData.length);
 
     /* =======================
-       STEP 1 — IMAGE ENHANCEMENT
-       Using Real-ESRGAN (supported)
+       STEP 1 — FACE RESTORATION
 ======================= */
-    console.log("🔍 Step 1: Running Real-ESRGAN (xinntao/real-esrgan:latest)...");
+    console.log("🔍 Step 1: Running Face Restoration (lucataco/face-restoration)...");
 
     let enhanced;
     try {
       enhanced = await replicate.run(
-        "xinntao/real-esrgan:latest",
+        "lucataco/face-restoration",
         {
           input: {
-            img: imageData,
-            scale: 2
+            image: imageData
           }
         }
       );
     } catch (err) {
-      console.error("❌ Real-ESRGAN ERROR:", err?.response?.data || err);
+      console.error("❌ Face Restoration ERROR:", err?.response?.data || err);
       return res.status(500).json({
         success: false,
-        error: "Image enhancement failed",
+        error: "Face restoration failed",
         details: err?.response?.data || err,
       });
     }
 
     if (!enhanced?.[0]) {
-      console.error("❌ Real-ESRGAN returned invalid output:", enhanced);
+      console.error("❌ Face restoration returned invalid output:", enhanced);
       return res.status(500).json({
         success: false,
-        error: "Image enhancement returned no output",
+        error: "Face restoration returned no output",
       });
     }
 
-    console.log("✅ Enhancement complete:", enhanced[0]);
+    console.log("✅ Face restoration complete:", enhanced[0]);
 
     /* =======================
        STEP 2 — CARTOONIZATION
