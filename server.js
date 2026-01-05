@@ -1,145 +1,158 @@
-import express from "express";
-import cors from "cors";
-import Replicate from "replicate";
-import { createClient } from "@supabase/supabase-js";
-import fetch from "node-fetch";
-
-const app = express();
-
 /* =======================
-   ENV VARIABLES
-======================= */
-const {
-  REPLICATE_API_TOKEN,
-  SUPABASE_URL,
-  SUPABASE_KEY,
-  FRONTEND_URL,
-} = process.env;
-
-if (
-  !REPLICATE_API_TOKEN ||
-  !SUPABASE_URL ||
-  !SUPABASE_KEY ||
-  !FRONTEND_URL
-) {
-  console.error("❌ Missing environment variables");
-  process.exit(1);
-}
-
-/* =======================
-   CREDIT CONFIG
-======================= */
-export const CREDIT_COST = {
-  basic: 1,
-  premium: 3,
-};
-
-/* =======================
-   CLIENTS
-======================= */
-const replicate = new Replicate({ auth: REPLICATE_API_TOKEN });
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-/* =======================
-   CORS (FIXED)
-======================= */
-app.use(
-  cors({
-    origin: [
-      FRONTEND_URL,                 // your Vercel frontend
-      "http://localhost:5173",      // local dev
-    ],
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
-
-// Preflight handler
-app.options("*", cors());
-
-app.use(express.json({ limit: "25mb" }));
-
-/* =======================
-   HEALTH CHECK
-======================= */
-app.get("/", (_, res) => {
-  res.json({ status: "Avatar API running" });
-});
-
-/* =======================
-   CARTOONIZE
+   CARTOONIZE (FULL VERSION)
 ======================= */
 app.post("/cartoonize", async (req, res) => {
+  console.log("📩 /cartoonize request received");
+
   try {
     const { imageData } = req.body;
 
+    /* =======================
+       VALIDATION
+    ======================= */
     if (!imageData) {
+      console.warn("⚠️ Missing imageData in request body");
       return res.status(400).json({
         success: false,
         error: "Image data is required",
       });
     }
 
-    console.log("🔍 Step 1: Face enhancement");
+    console.log("🖼 Received imageData length:", imageData.length);
 
-    const enhanced = await replicate.run(
-      "tencentarc/gfpgan:latest",
-      {
-        input: { image: imageData },
-      }
-    );
+    /* =======================
+       STEP 1 — FACE ENHANCEMENT
+    ======================= */
+    console.log("🔍 Step 1: Running GFPGAN (v1.4) for face enhancement...");
 
-    if (!enhanced?.[0]) {
-      throw new Error("Face enhancement failed");
+    let enhanced;
+    try {
+      enhanced = await replicate.run(
+        "tencentarc/gfpgan:1.4",
+        {
+          input: { image: imageData },
+        }
+      );
+    } catch (err) {
+      console.error("❌ GFPGAN ERROR:", err?.response?.data || err);
+      return res.status(500).json({
+        success: false,
+        error: "Face enhancement failed",
+        details: err?.response?.data || err,
+      });
     }
 
-    console.log("🎨 Step 2: Cartoonization");
-
-    const cartoon = await replicate.run(
-      "tencentarc/cartoon:latest",
-      {
-        input: { image: enhanced[0] },
-      }
-    );
-
-    if (!cartoon?.[0]) {
-      throw new Error("Cartoonization failed");
+    if (!enhanced || !enhanced[0]) {
+      console.error("❌ GFPGAN returned invalid output:", enhanced);
+      return res.status(500).json({
+        success: false,
+        error: "Face enhancement returned no output",
+      });
     }
 
-    console.log("☁️ Step 3: Uploading to Supabase");
+    console.log("✅ GFPGAN enhancement complete. Output URL:", enhanced[0]);
 
-    const imgRes = await fetch(cartoon[0]);
-    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    /* =======================
+       STEP 2 — CARTOONIZATION
+    ======================= */
+    console.log("🎨 Step 2: Running Cartoon model (v3.0)...");
+
+    let cartoon;
+    try {
+      cartoon = await replicate.run(
+        "tencentarc/cartoon:3.0",
+        {
+          input: { image: enhanced[0] },
+        }
+      );
+    } catch (err) {
+      console.error("❌ CARTOON MODEL ERROR:", err?.response?.data || err);
+      return res.status(500).json({
+        success: false,
+        error: "Cartoonization failed",
+        details: err?.response?.data || err,
+      });
+    }
+
+    if (!cartoon || !cartoon[0]) {
+      console.error("❌ Cartoon model returned invalid output:", cartoon);
+      return res.status(500).json({
+        success: false,
+        error: "Cartoonization returned no output",
+      });
+    }
+
+    console.log("✅ Cartoonization complete. Output URL:", cartoon[0]);
+
+    /* =======================
+       STEP 3 — DOWNLOAD RESULT
+    ======================= */
+    console.log("⬇️ Downloading cartoon image from Replicate...");
+
+    let buffer;
+    try {
+      const imgRes = await fetch(cartoon[0]);
+      buffer = Buffer.from(await imgRes.arrayBuffer());
+    } catch (err) {
+      console.error("❌ IMAGE DOWNLOAD ERROR:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to download cartoon image",
+      });
+    }
+
+    console.log("📦 Image downloaded. Size:", buffer.length, "bytes");
+
+    /* =======================
+       STEP 4 — UPLOAD TO SUPABASE
+    ======================= */
+    console.log("☁️ Step 3: Uploading to Supabase storage...");
 
     const fileName = `avatar-${Date.now()}.png`;
 
-    const { error } = await supabase.storage
-      .from("cartoonizer")
-      .upload(fileName, buffer, {
-        contentType: "image/png",
-        upsert: true,
+    let uploadResult;
+    try {
+      uploadResult = await supabase.storage
+        .from("cartoonizer")
+        .upload(fileName, buffer, {
+          contentType: "image/png",
+          upsert: true,
+        });
+    } catch (err) {
+      console.error("❌ SUPABASE UPLOAD ERROR:", err);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to upload image to Supabase",
       });
+    }
 
-    if (error) throw error;
+    if (uploadResult.error) {
+      console.error("❌ Supabase returned an error:", uploadResult.error);
+      return res.status(500).json({
+        success: false,
+        error: "Supabase upload failed",
+        details: uploadResult.error,
+      });
+    }
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
 
-    res.json({ success: true, url: publicUrl });
+    console.log("✅ Upload complete. Public URL:", publicUrl);
+
+    /* =======================
+       SUCCESS RESPONSE
+    ======================= */
+    return res.json({
+      success: true,
+      url: publicUrl,
+    });
 
   } catch (err) {
-    console.error("❌ Avatar error:", err);
-    res.status(500).json({
+    console.error("🔥 UNEXPECTED SERVER ERROR:", err?.response?.data || err);
+    return res.status(500).json({
       success: false,
-      error: "Image processing failed",
+      error: "Unexpected server error",
+      details: err?.response?.data || err,
     });
   }
 });
-
-/* =======================
-   START SERVER
-======================= */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
