@@ -47,7 +47,14 @@ app.use(
   })
 );
 
-app.options("*", cors());
+// Explicit OPTIONS handler (fixes Railway proxy issues)
+app.options("*", (req, res) => {
+  res.header("Access-Control-Allow-Origin", FRONTEND_URL);
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.sendStatus(204);
+});
+
 app.use(express.json({ limit: "25mb" }));
 
 /* =======================
@@ -58,7 +65,7 @@ app.get("/", (_, res) => {
 });
 
 /* =======================
-   CARTOONIZE (FACE RESTORATION + CARTOON 3.0)
+   CARTOONIZE ROUTE
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   console.log("📩 /cartoonize request received");
@@ -67,139 +74,50 @@ app.post("/cartoonize", async (req, res) => {
     const { imageData } = req.body;
 
     if (!imageData) {
-      console.warn("⚠️ Missing imageData in request body");
-      return res.status(400).json({
-        success: false,
-        error: "Image data is required",
-      });
+      console.log("❌ No image data received");
+      return res.status(400).json({ success: false, error: "Image required" });
     }
 
-    console.log("🖼 Received imageData length:", imageData.length);
+    console.log("🎨 Running cartoon model...");
 
-    /* =======================
-       STEP 1 — FACE RESTORATION
-======================= */
-    console.log("🔍 Step 1: Running Face Restoration (lucataco/face-restoration)...");
+    const output = await replicate.run(
+      "tencentarc/cartoon:latest",
+      {
+        input: {
+          image: imageData,
+        },
+      }
+    );
 
-    let enhanced;
-    try {
-      enhanced = await replicate.run(
-        "lucataco/face-restoration",
-        {
-          input: {
-            image: imageData
-          }
-        }
-      );
-    } catch (err) {
-      console.error("❌ Face Restoration ERROR:", err?.response?.data || err);
-      return res.status(500).json({
-        success: false,
-        error: "Face restoration failed",
-        details: err?.response?.data || err,
-      });
-    }
+    const imageUrl = output[0];
+    console.log("🖼 Cartoon model output:", imageUrl);
 
-    if (!enhanced?.[0]) {
-      console.error("❌ Face restoration returned invalid output:", enhanced);
-      return res.status(500).json({
-        success: false,
-        error: "Face restoration returned no output",
-      });
-    }
-
-    console.log("✅ Face restoration complete:", enhanced[0]);
-
-    /* =======================
-       STEP 2 — CARTOONIZATION
-======================= */
-    console.log("🎨 Step 2: Running Cartoon model (tencentarc/cartoon:3.0)...");
-
-    let cartoon;
-    try {
-      cartoon = await replicate.run(
-        "tencentarc/cartoon:3.0",
-        {
-          input: { image: enhanced[0] },
-        }
-      );
-    } catch (err) {
-      console.error("❌ CARTOON MODEL ERROR:", err?.response?.data || err);
-      return res.status(500).json({
-        success: false,
-        error: "Cartoonization failed",
-        details: err?.response?.data || err,
-      });
-    }
-
-    if (!cartoon?.[0]) {
-      console.error("❌ Cartoon model returned invalid output:", cartoon);
-      return res.status(500).json({
-        success: false,
-        error: "Cartoonization returned no output",
-      });
-    }
-
-    console.log("✅ Cartoonization complete:", cartoon[0]);
-
-    /* =======================
-       STEP 3 — DOWNLOAD RESULT
-======================= */
-    console.log("⬇️ Downloading cartoon image...");
-
-    let buffer;
-    try {
-      const imgRes = await fetch(cartoon[0]);
-      buffer = Buffer.from(await imgRes.arrayBuffer());
-    } catch (err) {
-      console.error("❌ IMAGE DOWNLOAD ERROR:", err);
-      return res.status(500).json({
-        success: false,
-        error: "Failed to download cartoon image",
-      });
-    }
-
-    console.log("📦 Image downloaded. Size:", buffer.length);
-
-    /* =======================
-       STEP 4 — UPLOAD TO SUPABASE
-======================= */
-    console.log("☁️ Uploading to Supabase...");
+    const response = await fetch(imageUrl);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
     const fileName = `avatar-${Date.now()}.png`;
+
+    console.log("⬆️ Uploading to Supabase:", fileName);
 
     const { error: uploadError } = await supabase.storage
       .from("cartoonizer")
       .upload(fileName, buffer, {
         contentType: "image/png",
-        upsert: true,
       });
 
     if (uploadError) {
-      console.error("❌ SUPABASE UPLOAD ERROR:", uploadError);
-      return res.status(500).json({
-        success: false,
-        error: "Supabase upload failed",
-        details: uploadError,
-      });
+      console.error("❌ Supabase upload error:", uploadError);
+      return res.status(500).json({ success: false, error: "Upload failed" });
     }
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
 
-    console.log("✅ Upload complete:", publicUrl);
+    console.log("✅ Avatar ready:", publicUrl);
 
-    return res.json({
-      success: true,
-      url: publicUrl,
-    });
-
+    res.json({ success: true, url: publicUrl });
   } catch (err) {
-    console.error("🔥 UNEXPECTED SERVER ERROR:", err?.response?.data || err);
-    return res.status(500).json({
-      success: false,
-      error: "Unexpected server error",
-      details: err?.response?.data || err,
-    });
+    console.error("❌ Avatar generation error:", err);
+    res.status(500).json({ success: false, error: "Avatar failed" });
   }
 });
 
@@ -207,6 +125,6 @@ app.post("/cartoonize", async (req, res) => {
    START SERVER
 ======================= */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`🚀 Server running on port ${PORT}`)
-);
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
