@@ -78,19 +78,19 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ success: false, error: "Image required" });
     }
 
-    console.log("🎨 Running cartoon model...");
+    console.log("🎨 Running fofr/cartoonify model...");
 
     const output = await replicate.run(
-      "tencentarc/cartoon:latest",
+      "fofr/cartoonify",
       {
         input: {
-          image: imageData,
-        },
+          image: imageData
+        }
       }
     );
 
     const imageUrl = output[0];
-    console.log("🖼 Cartoon model output:", imageUrl);
+    console.log("🖼 Model output:", imageUrl);
 
     const response = await fetch(imageUrl);
     const buffer = Buffer.from(await response.arrayBuffer());
