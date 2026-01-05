@@ -47,7 +47,7 @@ app.use(
   })
 );
 
-// Explicit OPTIONS handler (fixes Railway proxy issues)
+// Explicit OPTIONS handler
 app.options("*", (req, res) => {
   res.header("Access-Control-Allow-Origin", FRONTEND_URL);
   res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -78,10 +78,10 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ success: false, error: "Image required" });
     }
 
-    console.log("🎨 Running fofr/cartoonify model...");
+    console.log("🎨 Running zsxkib/cartoon-3d model...");
 
     const output = await replicate.run(
-      "fofr/cartoonify",
+      "zsxkib/cartoon-3d",
       {
         input: {
           image: imageData
