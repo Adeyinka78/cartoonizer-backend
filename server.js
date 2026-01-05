@@ -58,7 +58,7 @@ app.get("/", (_, res) => {
 });
 
 /* =======================
-   CARTOONIZE (FULL + UPDATED)
+   CARTOONIZE (REAL-ESRGAN + CARTOON 3.0)
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   console.log("📩 /cartoonize request received");
@@ -77,40 +77,40 @@ app.post("/cartoonize", async (req, res) => {
     console.log("🖼 Received imageData length:", imageData.length);
 
     /* =======================
-       STEP 1 — FACE ENHANCEMENT
-       Using new GFPGAN model:
-       xinntao/gfpgan:1.4
+       STEP 1 — IMAGE ENHANCEMENT
+       Using Real-ESRGAN (supported)
 ======================= */
-    console.log("🔍 Step 1: Running GFPGAN (xinntao/gfpgan:1.4)...");
+    console.log("🔍 Step 1: Running Real-ESRGAN (xinntao/real-esrgan:latest)...");
 
     let enhanced;
     try {
       enhanced = await replicate.run(
-        "xinntao/gfpgan:1.4",
+        "xinntao/real-esrgan:latest",
         {
           input: {
-            img: imageData, // NEW schema
-          },
+            img: imageData,
+            scale: 2
+          }
         }
       );
     } catch (err) {
-      console.error("❌ GFPGAN ERROR:", err?.response?.data || err);
+      console.error("❌ Real-ESRGAN ERROR:", err?.response?.data || err);
       return res.status(500).json({
         success: false,
-        error: "Face enhancement failed",
+        error: "Image enhancement failed",
         details: err?.response?.data || err,
       });
     }
 
     if (!enhanced?.[0]) {
-      console.error("❌ GFPGAN returned invalid output:", enhanced);
+      console.error("❌ Real-ESRGAN returned invalid output:", enhanced);
       return res.status(500).json({
         success: false,
-        error: "Face enhancement returned no output",
+        error: "Image enhancement returned no output",
       });
     }
 
-    console.log("✅ GFPGAN enhancement complete:", enhanced[0]);
+    console.log("✅ Enhancement complete:", enhanced[0]);
 
     /* =======================
        STEP 2 — CARTOONIZATION
