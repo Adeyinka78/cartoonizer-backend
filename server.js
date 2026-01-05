@@ -58,7 +58,7 @@ app.get("/", (_, res) => {
 });
 
 /* =======================
-   CARTOONIZE (FULL VERSION)
+   CARTOONIZE (FULL + UPDATED)
 ======================= */
 app.post("/cartoonize", async (req, res) => {
   console.log("📩 /cartoonize request received");
@@ -76,13 +76,22 @@ app.post("/cartoonize", async (req, res) => {
 
     console.log("🖼 Received imageData length:", imageData.length);
 
-    /* STEP 1 — FACE ENHANCEMENT */
-    console.log("🔍 Step 1: Running GFPGAN (v1.4)...");
+    /* =======================
+       STEP 1 — FACE ENHANCEMENT
+       Using new GFPGAN model:
+       xinntao/gfpgan:1.4
+======================= */
+    console.log("🔍 Step 1: Running GFPGAN (xinntao/gfpgan:1.4)...");
+
     let enhanced;
     try {
       enhanced = await replicate.run(
-        "tencentarc/gfpgan:1.4",
-        { input: { image: imageData } }
+        "xinntao/gfpgan:1.4",
+        {
+          input: {
+            img: imageData, // NEW schema
+          },
+        }
       );
     } catch (err) {
       console.error("❌ GFPGAN ERROR:", err?.response?.data || err);
@@ -101,15 +110,20 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    console.log("✅ GFPGAN output:", enhanced[0]);
+    console.log("✅ GFPGAN enhancement complete:", enhanced[0]);
 
-    /* STEP 2 — CARTOONIZATION */
-    console.log("🎨 Step 2: Running Cartoon model (v3.0)...");
+    /* =======================
+       STEP 2 — CARTOONIZATION
+======================= */
+    console.log("🎨 Step 2: Running Cartoon model (tencentarc/cartoon:3.0)...");
+
     let cartoon;
     try {
       cartoon = await replicate.run(
         "tencentarc/cartoon:3.0",
-        { input: { image: enhanced[0] } }
+        {
+          input: { image: enhanced[0] },
+        }
       );
     } catch (err) {
       console.error("❌ CARTOON MODEL ERROR:", err?.response?.data || err);
@@ -128,10 +142,13 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    console.log("✅ Cartoon output:", cartoon[0]);
+    console.log("✅ Cartoonization complete:", cartoon[0]);
 
-    /* STEP 3 — DOWNLOAD RESULT */
+    /* =======================
+       STEP 3 — DOWNLOAD RESULT
+======================= */
     console.log("⬇️ Downloading cartoon image...");
+
     let buffer;
     try {
       const imgRes = await fetch(cartoon[0]);
@@ -146,8 +163,11 @@ app.post("/cartoonize", async (req, res) => {
 
     console.log("📦 Image downloaded. Size:", buffer.length);
 
-    /* STEP 4 — UPLOAD TO SUPABASE */
+    /* =======================
+       STEP 4 — UPLOAD TO SUPABASE
+======================= */
     console.log("☁️ Uploading to Supabase...");
+
     const fileName = `avatar-${Date.now()}.png`;
 
     const { error: uploadError } = await supabase.storage
@@ -167,6 +187,7 @@ app.post("/cartoonize", async (req, res) => {
     }
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/cartoonizer/${fileName}`;
+
     console.log("✅ Upload complete:", publicUrl);
 
     return res.json({
