@@ -47,7 +47,6 @@ app.use(
   })
 );
 
-// Explicit OPTIONS handler
 app.options("*", (req, res) => {
   res.header("Access-Control-Allow-Origin", FRONTEND_URL);
   res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -78,18 +77,19 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ success: false, error: "Image required" });
     }
 
-    console.log("🎨 Running zsxkib/cartoon-3d model...");
+    console.log("🎨 Running catacolabs/cartoonify model...");
 
     const output = await replicate.run(
-      "zsxkib/cartoon-3d",
+      "catacolabs/cartoonify:f109015d60170dfb20460f17da8cb863155823c85ece1115e1e9e4ec7ef51d3b",
       {
         input: {
-          image: imageData
+          image: imageData,
+          seed: 12345
         }
       }
     );
 
-    const imageUrl = output[0];
+    const imageUrl = output.url;
     console.log("🖼 Model output:", imageUrl);
 
     const response = await fetch(imageUrl);
