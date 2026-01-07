@@ -32,7 +32,7 @@ app.get("/", (req, res) => {
 });
 
 // -----------------------------
-// CARTOONIZE (Replicate)
+// CARTOONIZE (Replicate - WORKING MODEL)
 // -----------------------------
 app.post("/cartoonize", async (req, res) => {
   try {
@@ -42,12 +42,14 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    const output = await replicate.run("tencentarc/cartoon:3.0", {
-      input: {
-        image: image,
-        scale: 2,
-      },
-    });
+    const output = await replicate.run(
+      "catacolabs/cartoonify",
+      {
+        input: {
+          image: image
+        }
+      }
+    );
 
     res.json({ cartoonImage: output });
   } catch (error) {
