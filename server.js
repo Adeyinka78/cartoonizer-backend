@@ -4,7 +4,6 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
-import Replicate from "replicate";
 
 const app = express();
 app.use(cors());
@@ -18,13 +17,6 @@ const openai = new OpenAI({
 });
 
 // -----------------------------
-// REPLICATE
-// -----------------------------
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_KEY,
-});
-
-// -----------------------------
 // HEALTH CHECK
 // -----------------------------
 app.get("/", (req, res) => {
@@ -32,7 +24,7 @@ app.get("/", (req, res) => {
 });
 
 // -----------------------------
-// CARTOONIZE (Replicate - WORKING MODEL)
+// CARTOONIZE (OpenAI Image Editing)
 // -----------------------------
 app.post("/cartoonize", async (req, res) => {
   try {
@@ -42,16 +34,16 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    const output = await replicate.run(
-      "fofr/cartoon-3d",
-      {
-        input: {
-          image: image
-        }
-      }
-    );
+    const result = await openai.images.edits({
+      model: "gpt-image-1",
+      image: image,
+      prompt: "Convert this image into a cartoon-style illustration.",
+      size: "1024x1024"
+    });
 
-    res.json({ cartoonImage: output });
+    const cartoonUrl = result.data[0].url;
+
+    res.json({ cartoonImage: cartoonUrl });
   } catch (error) {
     console.error("Cartoonize error:", error);
     res.status(500).json({
