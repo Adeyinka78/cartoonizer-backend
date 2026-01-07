@@ -24,7 +24,7 @@ app.get("/", (req, res) => {
 });
 
 // -----------------------------
-// CARTOONIZE (OpenAI Image Editing)
+// CARTOONIZE (OpenAI Image Generation)
 // -----------------------------
 app.post("/cartoonize", async (req, res) => {
   try {
@@ -34,10 +34,15 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    const result = await openai.images.edits({
+    const prompt = `
+      Convert the person in this image into a cartoon-style illustration.
+      Here is the image in base64 format:
+      ${image}
+    `;
+
+    const result = await openai.images.generate({
       model: "gpt-image-1",
-      image: image,
-      prompt: "Convert this image into a cartoon-style illustration.",
+      prompt: prompt,
       size: "1024x1024"
     });
 
