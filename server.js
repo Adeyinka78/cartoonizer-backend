@@ -43,7 +43,7 @@ app.post("/cartoonize", async (req, res) => {
     }
 
     const output = await replicate.run(
-      "catacolabs/cartoonify",
+      "fofr/cartoon-3d",
       {
         input: {
           image: image
