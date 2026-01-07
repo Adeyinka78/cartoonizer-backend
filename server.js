@@ -4,23 +4,31 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
+import Replicate from "replicate";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 
-// Initialize OpenAI client
+// Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Health check
+// Initialize Replicate
+const replicate = new Replicate({
+  auth: process.env.REPLICATE_API_KEY,
+});
+
+/* -------------------------------------------------------
+   HEALTH CHECK
+-------------------------------------------------------- */
 app.get("/", (req, res) => {
   res.json({ status: "Backend is running" });
 });
 
 /* -------------------------------------------------------
-   CARTOONIZE ENDPOINT
+   CARTOONIZE ENDPOINT (Replicate)
 -------------------------------------------------------- */
 app.post("/cartoonize", async (req, res) => {
   try {
@@ -30,15 +38,14 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    const result = await openai.images.generate({
-      model: "gpt-image-1",
-      prompt: "Convert this image into a cartoon style",
-      image,
-      size: "1024x1024",
+    const output = await replicate.run("tencentarc/cartoon:3.0", {
+      input: {
+        image: image,
+        scale: 2,
+      },
     });
 
-    const cartoonImage = result.data[0].url;
-    res.json({ cartoonImage });
+    res.json({ cartoonImage: output });
   } catch (error) {
     console.error("Cartoonize error:", error);
     res.status(500).json({ error: "Failed to cartoonize image" });
@@ -46,7 +53,7 @@ app.post("/cartoonize", async (req, res) => {
 });
 
 /* -------------------------------------------------------
-   RESUME GENERATOR ENDPOINT
+   RESUME GENERATOR ENDPOINT (OpenAI)
 -------------------------------------------------------- */
 app.post("/resume", async (req, res) => {
   try {
@@ -76,14 +83,16 @@ app.post("/resume", async (req, res) => {
 });
 
 /* -------------------------------------------------------
-   LINKEDIN OPTIMIZER ENDPOINT
+   LINKEDIN OPTIMIZER ENDPOINT (OpenAI)
 -------------------------------------------------------- */
 app.post("/linkedin", async (req, res) => {
   try {
     const { profile } = req.body;
 
     if (!profile) {
-      return res.status(400).json({ error: "LinkedIn profile text required" });
+      return res
+        .status(400)
+        .json({ error: "LinkedIn profile text is required" });
     }
 
     const completion = await openai.chat.completions.create({
