@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 
 // -----------------------------
-// OPENAI
+// OPENAI CLIENT
 // -----------------------------
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -24,7 +24,7 @@ app.get("/", (req, res) => {
 });
 
 // -----------------------------
-// CARTOONIZE (OpenAI Image Generation)
+// CARTOONIZE ENDPOINT
 // -----------------------------
 app.post("/cartoonize", async (req, res) => {
   try {
@@ -46,9 +46,16 @@ app.post("/cartoonize", async (req, res) => {
       size: "1024x1024"
     });
 
-    const cartoonUrl = result.data[0].url;
+    // Debug: expose full result if URL missing
+    if (!result?.data?.[0]?.url) {
+      return res.status(500).json({
+        error: "Cartoonization failed",
+        details: result
+      });
+    }
 
-    res.json({ cartoonImage: cartoonUrl });
+    res.json({ cartoonImage: result.data[0].url });
+
   } catch (error) {
     console.error("Cartoonize error:", error);
     res.status(500).json({
@@ -59,7 +66,7 @@ app.post("/cartoonize", async (req, res) => {
 });
 
 // -----------------------------
-// RESUME GENERATOR (OpenAI)
+// RESUME GENERATOR
 // -----------------------------
 app.post("/resume", async (req, res) => {
   try {
@@ -82,6 +89,7 @@ app.post("/resume", async (req, res) => {
     });
 
     res.json({ resume: completion.choices[0].message.content });
+
   } catch (error) {
     console.error("Resume error:", error);
     res.status(500).json({
@@ -92,7 +100,7 @@ app.post("/resume", async (req, res) => {
 });
 
 // -----------------------------
-// LINKEDIN OPTIMIZER (OpenAI)
+// LINKEDIN OPTIMIZER
 // -----------------------------
 app.post("/linkedin", async (req, res) => {
   try {
@@ -117,6 +125,7 @@ app.post("/linkedin", async (req, res) => {
     });
 
     res.json({ optimized: completion.choices[0].message.content });
+
   } catch (error) {
     console.error("LinkedIn error:", error);
     res.status(500).json({
