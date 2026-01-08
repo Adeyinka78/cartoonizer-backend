@@ -46,15 +46,32 @@ app.post("/cartoonize", async (req, res) => {
       size: "1024x1024"
     });
 
-    // Debug: expose full result if URL missing
-    if (!result?.data?.[0]?.url) {
+    const item = result?.data?.[0];
+
+    if (!item) {
       return res.status(500).json({
         error: "Cartoonization failed",
         details: result
       });
     }
 
-    res.json({ cartoonImage: result.data[0].url });
+    // CASE 1: Hosted URL
+    if (item.url) {
+      return res.json({ cartoonImage: item.url });
+    }
+
+    // CASE 2: Base64 PNG returned
+    if (item.b64_json) {
+      return res.json({
+        cartoonImageBase64: `data:image/png;base64,${item.b64_json}`
+      });
+    }
+
+    // If neither exists
+    return res.status(500).json({
+      error: "Cartoonization failed",
+      details: item
+    });
 
   } catch (error) {
     console.error("Cartoonize error:", error);
