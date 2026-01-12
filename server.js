@@ -27,9 +27,9 @@ app.post("/cartoonize", async (req, res) => {
 
     console.log("Received image, sending to FLUX...");
 
-    // ⭐ Correct working FLUX image-to-image model
+    // ⭐ WORKING FLUX IMG2IMG MODEL
     const output = await replicate.run(
-      "black-forest-labs/flux-1.1-pro-img2img",
+      "fofr/flux-1.1-img2img",
       {
         input: {
           image, // base64 input
@@ -48,7 +48,7 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    // Replicate returns a URL — send it back to frontend
+    // Return the cartoon image URL
     return res.json({
       cartoonImage: output[0],
     });
