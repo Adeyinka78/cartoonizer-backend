@@ -25,22 +25,23 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    console.log("Received image, sending to FLUX...");
+    console.log("Received image, sending to SDXL...");
 
-    // ⭐ WORKING FLUX IMG2IMG MODEL
+    // ⭐ FINAL WORKING MODEL — SDXL IMG2IMG
     const output = await replicate.run(
-      "fofr/flux-1.1-img2img",
+      "stability-ai/sdxl-img2img",
       {
         input: {
           image, // base64 input
-          prompt: "cartoon style portrait, clean lines, vibrant colors",
-          strength: 0.85,
-          guidance: 3.5,
+          prompt:
+            "cartoon style portrait, clean lines, vibrant colors, smooth shading, Pixar-like, professional digital illustration",
+          strength: 0.75,
+          guidance: 7,
         },
       }
     );
 
-    console.log("FLUX output:", output);
+    console.log("SDXL output:", output);
 
     if (!output || !output[0]) {
       return res.status(500).json({
@@ -48,7 +49,6 @@ app.post("/cartoonize", async (req, res) => {
       });
     }
 
-    // Return the cartoon image URL
     return res.json({
       cartoonImage: output[0],
     });
