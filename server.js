@@ -1,13 +1,13 @@
 import express from "express";
 import cors from "cors";
-import * as fal from "@fal-ai/client";
+import { fal } from "@fal-ai/client";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// ⭐ Correct Fal.ai initialization
-fal.settings({
+// Correct Fal.ai initialization
+fal.config({
   credentials: process.env.FAL_KEY,
 });
 
@@ -27,18 +27,15 @@ app.post("/cartoonize", async (req, res) => {
 
     console.log("Received image, sending to Fal FLUX...");
 
-    // ⭐ Correct FLUX img2img endpoint
-    const result = await fal.subscribe("fal-ai/flux/dev/image-to-image", {
+    const result = await fal.run("fal-ai/flux/dev/image-to-image", {
       input: {
-        image_url: image, // base64 data URL from frontend
+        image_url: image,
         prompt:
           "cartoon style portrait, clean lines, vibrant colors, smooth shading, Pixar-like, professional digital illustration",
         strength: 0.85,
         guidance_scale: 7,
         num_inference_steps: 24,
       },
-      logs: false,
-      onResult: () => {},
     });
 
     console.log("Fal FLUX result:", result);
