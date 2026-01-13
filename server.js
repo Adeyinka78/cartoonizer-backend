@@ -1,22 +1,11 @@
 import express from "express";
 import cors from "cors";
-import { fal } from "@fal-ai/client";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
-// Correct Fal.ai initialization
-fal.config({
-  credentials: process.env.FAL_KEY,
-});
-
-// Health check
-app.get("/", (req, res) => {
-  res.json({ status: "Cartoonizer backend running (Fal FLUX img2img)" });
-});
-
-// Cartoonize endpoint
 app.post("/cartoonize", async (req, res) => {
   try {
     const { image } = req.body;
@@ -25,45 +14,50 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    console.log("Received image, sending to Fal FLUX...");
-
-    const result = await fal.run("fal-ai/flux/dev/image-to-image", {
-      input: {
-        image_url: image,
-        prompt:
-          "cartoon style portrait, clean lines, vibrant colors, smooth shading, Pixar-like, professional digital illustration",
-        strength: 0.85,
-        guidance_scale: 7,
-        num_inference_steps: 24,
+    const response = await fetch("https://api.fal.ai/fal-ai/flux/dev/image-to-image", {
+      method: "POST",
+      headers: {
+        "Authorization": `Key ${process.env.FAL_KEY}`,
+        "Content-Type": "application/json"
       },
+      body: JSON.stringify({
+        input: {
+          image_url: image,
+          prompt: "cartoon style portrait, clean lines, vibrant colors",
+          strength: 0.85,
+          guidance_scale: 7,
+          num_inference_steps: 24
+        }
+      })
     });
 
-    console.log("Fal FLUX result:", result);
+    const result = await response.json();
 
-    const images = result?.images || result?.output?.images || [];
-    const firstImage = images[0]?.url || images[0];
+    const firstImage =
+      result?.images?.[0]?.url ||
+      result?.output?.images?.[0]?.url ||
+      result?.images?.[0] ||
+      null;
 
     if (!firstImage) {
       return res.status(500).json({
-        error: "Failed to generate cartoon image",
-        details: "No image returned from Fal FLUX endpoint",
+        error: "No image returned from Fal",
+        details: result
       });
     }
 
-    return res.json({
-      cartoonImage: firstImage,
-    });
+    return res.json({ cartoonImage: firstImage });
+
   } catch (error) {
-    console.error("Cartoonize error (Fal):", error);
+    console.error("Cartoonize error:", error);
     return res.status(500).json({
       error: "Failed to cartoonize image",
-      details: error.message,
+      details: error.message
     });
   }
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Cartoonizer backend running on port ${PORT}`);
+  console.log(`Backend running on port ${PORT}`);
 });
