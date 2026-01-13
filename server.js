@@ -21,28 +21,7 @@ app.post("/cartoonize", async (req, res) => {
     // 1. Strip data URL prefix (Fal requires raw base64)
     const base64 = image.replace(/^data:image\/\w+;base64,/, "");
 
-    // 2. Upload to Fal (correct field name: content)
-    const uploadRes = await fetch("https://api.fal.ai/v1/upload", {
-      method: "POST",
-      headers: {
-        "Authorization": `Key ${process.env.FAL_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ content: base64 })
-    });
-
-    const uploadJson = await uploadRes.json();
-    const uploadedUrl = uploadJson.url;
-
-    if (!uploadedUrl) {
-      console.error("Fal upload failed:", uploadJson); // <-- LOG IT
-      return res.status(500).json({
-        error: "Failed to upload image to Fal",
-        details: uploadJson
-      });
-    }
-
-    // 3. Run FLUX img2img using uploaded URL
+    // 2. Send base64 directly to FLUX img2img
     const fluxRes = await fetch("https://api.fal.ai/fal-ai/flux/dev/image-to-image", {
       method: "POST",
       headers: {
@@ -51,7 +30,7 @@ app.post("/cartoonize", async (req, res) => {
       },
       body: JSON.stringify({
         input: {
-          image_url: uploadedUrl,
+          image_base64: base64,   // ⭐ THIS IS THE FIX
           prompt: "cartoon style portrait, clean lines, vibrant colors, smooth shading",
           strength: 0.85,
           guidance_scale: 7,
@@ -69,6 +48,7 @@ app.post("/cartoonize", async (req, res) => {
       null;
 
     if (!firstImage) {
+      console.error("Fal FLUX returned no image:", fluxJson);
       return res.status(500).json({
         error: "No image returned from Fal",
         details: fluxJson
