@@ -21,8 +21,8 @@ app.post("/cartoonize", async (req, res) => {
     // Strip data URL prefix → Fal requires raw base64 only
     const base64 = image.replace(/^data:image\/\w+;base64,/, "");
 
-    // ⭐ Correct Fal endpoint that supports img2img
-    const fluxRes = await fetch("https://api.fal.ai/fal-ai/flux-lora", {
+    // ⭐ Correct Fal endpoint for your model
+    const fluxRes = await fetch("https://api.fal.ai/fal-ai/flux-krea-lora", {
       method: "POST",
       headers: {
         "Authorization": `Key ${process.env.FAL_KEY}`,
@@ -30,7 +30,7 @@ app.post("/cartoonize", async (req, res) => {
       },
       body: JSON.stringify({
         input: {
-          image_base64: base64,   // ⭐ Correct field
+          image_base64: base64,
           prompt: "cartoon style portrait, clean lines, vibrant colors, smooth shading",
           strength: 0.85,
           guidance_scale: 7,
