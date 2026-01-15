@@ -18,11 +18,11 @@ app.post("/cartoonize", async (req, res) => {
       return res.status(400).json({ error: "Image is required" });
     }
 
-    // 1. Strip data URL prefix (Fal requires raw base64)
+    // Strip data URL prefix → Fal requires raw base64 only
     const base64 = image.replace(/^data:image\/\w+;base64,/, "");
 
-    // 2. Send base64 directly to FLUX img2img
-    const fluxRes = await fetch("https://api.fal.ai/fal-ai/flux/dev/image-to-image", {
+    // ⭐ Correct Fal endpoint that supports img2img
+    const fluxRes = await fetch("https://api.fal.ai/fal-ai/flux-lora", {
       method: "POST",
       headers: {
         "Authorization": `Key ${process.env.FAL_KEY}`,
@@ -30,7 +30,7 @@ app.post("/cartoonize", async (req, res) => {
       },
       body: JSON.stringify({
         input: {
-          image_base64: base64,   // ⭐ THIS IS THE FIX
+          image_base64: base64,   // ⭐ Correct field
           prompt: "cartoon style portrait, clean lines, vibrant colors, smooth shading",
           strength: 0.85,
           guidance_scale: 7,
